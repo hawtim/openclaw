@@ -1,0 +1,56 @@
+#!/bin/bash
+# AICA Wrapper: post-rewrite
+# Buffers stdin once, uses it for AICA logic, replays to original hook
+
+HOOK_FORWARDER="/Users/haotian.zhang/aica-client/bin/hook-forwarder"
+ORIGINAL_HOOK=""
+
+# Buffer stdin first (can only be read once!)
+STDIN_CONTENT=""
+while IFS= read -r line || [ -n "$line" ]; do
+    if [ -n "$STDIN_CONTENT" ]; then
+        STDIN_CONTENT="${STDIN_CONTENT}
+${line}"
+    else
+        STDIN_CONTENT="${line}"
+    fi
+done
+
+# --- AICA logic: parse stdin for commit mappings ---
+REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -x "$HOOK_FORWARDER" ]; then
+    REMOTE_URL=$(git config --get remote.origin.url 2>/dev/null || echo "")
+    MAPPINGS=""
+    if [ -n "$STDIN_CONTENT" ]; then
+        while read old_sha new_sha rest; do
+            if [ -n "$old_sha" ] && [ -n "$new_sha" ]; then
+                if [ -n "$MAPPINGS" ]; then
+                    MAPPINGS="$MAPPINGS,"
+                fi
+                MAPPINGS="$MAPPINGS{\"old_commit_id\":\"$old_sha\",\"new_commit_id\":\"$new_sha\"}"
+            fi
+        done <<< "$STDIN_CONTENT"
+    fi
+    JSON_PAYLOAD=$(cat <<AICA_EOF
+{
+    "hook_source": "git",
+    "hook_event_name": "post-rewrite",
+    "commit_mappings": [$MAPPINGS],
+    "remote_url": "$REMOTE_URL",
+    "repository_path": "$REPO_PATH"
+}
+AICA_EOF
+)
+    "$HOOK_FORWARDER" "$JSON_PAYLOAD" &
+fi
+
+# --- Replay stdin to original hook ---
+if [ -n "$ORIGINAL_HOOK" ] && [ -x "$ORIGINAL_HOOK" ]; then
+    if [ -n "$STDIN_CONTENT" ]; then
+        printf '%s\n' "$STDIN_CONTENT" | "$ORIGINAL_HOOK" "$@"
+    else
+        "$ORIGINAL_HOOK" "$@"
+    fi
+    exit $?
+fi
+exit 0

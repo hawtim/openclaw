@@ -1,0 +1,33 @@
+#!/bin/bash
+# AICA Wrapper: post-commit
+# Calls AICA hook-forwarder, then invokes the original hook
+
+HOOK_FORWARDER="/Users/haotian.zhang/aica-client/bin/hook-forwarder"
+ORIGINAL_HOOK=""
+
+# --- AICA logic ---
+REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -x "$HOOK_FORWARDER" ]; then
+    COMMIT_ID=$(git rev-parse HEAD 2>/dev/null || echo "")
+    PARENT_SHA=$(git rev-parse HEAD^ 2>/dev/null || echo "")
+    REMOTE_URL=$(git config --get remote.origin.url 2>/dev/null || echo "")
+    JSON_PAYLOAD=$(cat <<AICA_EOF
+{
+    "hook_source": "git",
+    "hook_event_name": "post-commit",
+    "commit_id": "$COMMIT_ID",
+    "parent_sha": "$PARENT_SHA",
+    "remote_url": "$REMOTE_URL",
+    "repository_path": "$REPO_PATH"
+}
+AICA_EOF
+)
+    "$HOOK_FORWARDER" "$JSON_PAYLOAD" &
+fi
+
+# --- Call original hook ---
+if [ -n "$ORIGINAL_HOOK" ] && [ -x "$ORIGINAL_HOOK" ]; then
+    "$ORIGINAL_HOOK" "$@"
+    exit $?
+fi
+exit 0
